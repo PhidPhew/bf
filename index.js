@@ -18,7 +18,7 @@ const serviceAccount = {
   type: "service_account",
   project_id: process.env.FIREBASE_PROJECT_ID,
   private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  private_key: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
   client_email: process.env.FIREBASE_CLIENT_EMAIL,
   client_id: process.env.FIREBASE_CLIENT_ID,
   auth_uri: "https://accounts.google.com/o/oauth2/auth",
@@ -27,27 +27,43 @@ const serviceAccount = {
   client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL
 };
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}-default-rtdb.asia-southeast1.firebasedatabase.app/`
-});
+// ตรวจสอบ Firebase configuration
+console.log('Firebase Config Check:');
+console.log('Project ID:', process.env.FIREBASE_PROJECT_ID);
+console.log('Client Email:', process.env.FIREBASE_CLIENT_EMAIL);
+console.log('Private Key exists:', !!process.env.FIREBASE_PRIVATE_KEY);
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    // เปลี่ยนจาก databaseURL เป็น Firestore
+  });
+  console.log('Firebase initialized successfully');
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+}
 
 const db = admin.firestore();
 
 // Fuzzy search function
 async function findAnswer(question) {
   try {
+    console.log('Searching for:', question);
+    
+    // ตรวจสอบ Firebase connection
     const snapshot = await db.collection('audio_content').get();
+    console.log('Documents found:', snapshot.size);
     
     if (snapshot.empty) {
-      return 'ขออภัยครับ ยังไม่มีข้อมูลในระบบ';
+      return 'ขออภัยครับ ยังไม่มีข้อมูลในระบบ\nกรุณาเพิ่มข้อมูลใน Firestore ก่อนนะครับ';
     }
 
     let bestMatch = null;
-    let bestScore = 0;
+    let bestScore = -Infinity;
 
     snapshot.forEach(doc => {
       const data = doc.data();
+      console.log('Checking document:', doc.id, data);
       
       // ค้นหาจาก question field
       if (data.question) {
@@ -55,6 +71,7 @@ async function findAnswer(question) {
         if (result && result.score > bestScore) {
           bestScore = result.score;
           bestMatch = data;
+          console.log('New best match from question:', result.score, data.question);
         }
       }
 
@@ -65,27 +82,34 @@ async function findAnswer(question) {
           if (result && result.score > bestScore) {
             bestScore = result.score;
             bestMatch = data;
+            console.log('New best match from keyword:', result.score, keyword);
           }
         });
       }
     });
 
-    if (bestMatch && bestScore > -3000) { // threshold สำหรับ fuzzy matching
+    console.log('Final best score:', bestScore);
+    console.log('Final best match:', bestMatch);
+
+    if (bestMatch && bestScore > -3000) {
       // สุ่มคำตอบระหว่าง fern_answer และ nannam_answer
       const answers = [];
       if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
       if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
       
       if (answers.length > 0) {
-        return answers[Math.floor(Math.random() * answers.length)];
+        const selectedAnswer = answers[Math.floor(Math.random() * answers.length)];
+        console.log('Selected answer:', selectedAnswer);
+        return selectedAnswer;
       }
     }
 
-    return 'ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\nลองถามใหม่ด้วยคำที่ง่ายๆ หน่อยนะครับ';
+    return 'ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\nลองถามด้วยคำง่ายๆ เช่น "ชอบอะไร" หรือ "กินอะไร"';
 
   } catch (error) {
     console.error('Error finding answer:', error);
-    return 'เกิดข้อผิดพลาดครับ กรุณาลองใหม่อีกครั้ง';
+    console.error('Error details:', error.message);
+    return `เกิดข้อผิดพลาดครับ: ${error.message}\nกรุณาตรวจสอบการตั้งค่า Firebase`;
   }
 }
 
