@@ -1,0 +1,22 @@
+{
+  "name": "line-chatbot-firebase",
+  "version": "1.0.0",
+  "description": "LINE Chatbot with Firebase backend",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "@line/bot-sdk": "^8.0.2",
+    "firebase-admin": "^11.11.0",
+    "fuzzysort": "^2.0.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
