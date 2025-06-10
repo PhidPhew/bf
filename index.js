@@ -305,60 +305,36 @@ async function findAnswer(originalQuestion) {
     console.log(`\n🎯 Final best match score: ${bestScore}`);
     console.log('📄 Best match from document:', bestDocId);
 
-    // ลด threshold ให้ต่ำลง เพื่อให้ตอบได้มากขึ้น
+    // --- START: MODIFIED CODE ---
+    // ลด threshold ให้ต่ำลง และนำเฉพาะคำตอบมาแสดง
     if (bestMatch && bestScore > -1000) {
       let selectedAnswer = '';
       
-      if (targetPerson === 'fern' && bestMatch.fern_answer) {
-        selectedAnswer = `เฟิร์น: ${bestMatch.fern_answer}`;
-      } else if (targetPerson === 'nannam' && bestMatch.nannam_answer) {
-        selectedAnswer = `น่านน้ำ: ${bestMatch.nannam_answer}`;
-      } else if (targetPerson === 'both') {
+      if (targetPerson === 'fern') {
+        // ถ้าคำถามเจาะจงถึง "เฟิร์น" ให้ใช้คำตอบของเฟิร์นเท่านั้น
+        selectedAnswer = bestMatch.fern_answer || '';
+      } else if (targetPerson === 'nannam') {
+        // ถ้าคำถามเจาะจงถึง "น่านน้ำ" ให้ใช้คำตอบของน่านน้ำเท่านั้น
+        selectedAnswer = bestMatch.nannam_answer || '';
+      } else { 
+        // กรณีอื่นๆ (เช่น ถามถึงทั้งคู่ หรือไม่ได้เจาะจง) ให้รวมคำตอบที่มี
         const answers = [];
-        if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
-        if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
-        
-        if (answers.length === 2) {
-          selectedAnswer = answers.join('\n\n');
-        } else if (answers.length === 1) {
-          selectedAnswer = answers[0];
-        }
-      }
-      
-      // ถ้าไม่มีคำตอบที่เหมาะสม ลองหาทางเลือกอื่น
-      if (!selectedAnswer) {
-        const fallbackAnswers = [];
-        if (bestMatch.fern_answer) fallbackAnswers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
-        if (bestMatch.nannam_answer) fallbackAnswers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
-        
-        if (fallbackAnswers.length > 0) {
-          if (targetPerson === 'fern') {
-            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของเฟิร์นสำหรับคำถามนี้ 😅\nแต่มีข้อมูลใกล้เคียง: ${fallbackAnswers[0]}`;
-          } else if (targetPerson === 'nannam') {
-            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของน่านน้ำสำหรับคำถามนี้ 😅\nแต่มีข้อมูลใกล้เคียง: ${fallbackAnswers[fallbackAnswers.length - 1]}`;
-          } else {
-            selectedAnswer = fallbackAnswers[Math.floor(Math.random() * fallbackAnswers.length)];
-          }
-        }
+        if (bestMatch.fern_answer) answers.push(bestMatch.fern_answer);
+        if (bestMatch.nannam_answer) answers.push(bestMatch.nannam_answer);
+        selectedAnswer = answers.join('\n\n');
       }
       
       if (selectedAnswer) {
         console.log('✅ Answer found:', selectedAnswer.substring(0, 100) + '...');
-        return selectedAnswer;
+        return selectedAnswer; // คืนค่าเฉพาะคำตอบ
       }
     }
 
-    // ถ้าไม่เจอเลย ให้แสดงคำแนะนำที่ชาญฉลาดขึ้น
+    // ถ้าไม่พบคำตอบ ให้แสดงข้อความใหม่ตามที่ต้องการ
     console.log('❌ No matching answer found');
     
-    // หาคำถามที่คล้ายที่สุด 3 อันดับแรก
-    const suggestions = allMatches
-      .filter(match => match.data.question)
-      .slice(0, 3)
-      .map(match => `"${match.data.question}"`)
-      .join('\n- ');
-    
-    return `ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\n\nลองถามคำถามที่คล้ายๆ กันนะครับ:\n- ${suggestions}`;
+    return `น้ำยังฟังคำถามไม่ออกอ่าา ลองถามคำถามใหม่ดูนะ\n\nเช่น:\n- "เฟิร์นชอบดื่มอะไร"\n- "น่านน้ำชอบอาหารอะไร"`;
+    // --- END: MODIFIED CODE ---
 
   } catch (error) {
     console.error('❌ Error finding answer:', error);
