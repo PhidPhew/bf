@@ -310,13 +310,13 @@ async function findAnswer(originalQuestion) {
       let selectedAnswer = '';
       
       if (targetPerson === 'fern' && bestMatch.fern_answer) {
-        selectedAnswer = `เฟิร์น: ${bestMatch.fern_answer}`;
+        selectedAnswer = bestMatch.fern_answer;
       } else if (targetPerson === 'nannam' && bestMatch.nannam_answer) {
-        selectedAnswer = `น่านน้ำ: ${bestMatch.nannam_answer}`;
+        selectedAnswer = bestMatch.nannam_answer;
       } else if (targetPerson === 'both') {
         const answers = [];
-        if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
-        if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
+        if (bestMatch.fern_answer) answers.push(bestMatch.fern_answer);
+        if (bestMatch.nannam_answer) answers.push(bestMatch.nannam_answer);
         
         if (answers.length === 2) {
           selectedAnswer = answers.join('\n\n');
@@ -328,8 +328,8 @@ async function findAnswer(originalQuestion) {
       // ถ้าไม่มีคำตอบที่เหมาะสม ลองหาทางเลือกอื่น
       if (!selectedAnswer) {
         const fallbackAnswers = [];
-        if (bestMatch.fern_answer) fallbackAnswers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
-        if (bestMatch.nannam_answer) fallbackAnswers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
+        if (bestMatch.fern_answer) fallbackAnswers.push(bestMatch.fern_answer);
+        if (bestMatch.nannam_answer) fallbackAnswers.push(bestMatch.nannam_answer);
         
         if (fallbackAnswers.length > 0) {
           if (targetPerson === 'fern') {
@@ -358,7 +358,7 @@ async function findAnswer(originalQuestion) {
       .map(match => `"${match.data.question}"`)
       .join('\n- ');
     
-    return `ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\n\nลองถามคำถามที่คล้ายๆ กันนะครับ:\n- ${suggestions}`;
+    return `น้ำยังฟังคำถามไม่ออกอ่าา ลองถามคำถามใหม่ดูนะ:\n- ${suggestions}`;
 
   } catch (error) {
     console.error('❌ Error finding answer:', error);
