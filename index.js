@@ -107,10 +107,67 @@ async function testFirestoreConnection() {
 // Test connection on startup
 testFirestoreConnection();
 
-// ปรับปรุง Fuzzy search function ให้ค้นหาจาก preferences collection
-async function findAnswer(question) {
+// ฟังก์ชันสำหรับตรวจจับชื่อคนในคำถาม
+function detectPersonInQuestion(question) {
+  const lowerQuestion = question.toLowerCase();
+  
+  // รายการคำที่เกี่ยวข้องกับแต่ละคน
+  const fernKeywords = ['เฟิร์น', 'fern', 'เฟิ', 'เฟิ่น'];
+  const nannamKeywords = ['น่านน้ำ', 'nannam', 'นานาม', 'น่าน', 'นาน'];
+  
+  // ตรวจจับคำที่เกี่ยวข้องกับเฟิร์น
+  const hasFernKeyword = fernKeywords.some(keyword => 
+    lowerQuestion.includes(keyword.toLowerCase())
+  );
+  
+  // ตรวจจับคำที่เกี่ยวข้องกับน่านน้ำ
+  const hasNannamKeyword = nannamKeywords.some(keyword => 
+    lowerQuestion.includes(keyword.toLowerCase())
+  );
+  
+  if (hasFernKeyword && !hasNannamKeyword) {
+    return 'fern';
+  } else if (hasNannamKeyword && !hasFernKeyword) {
+    return 'nannam';
+  } else {
+    return 'both'; // ถ้าไม่มีการระบุชื่อหรือมีทั้งคู่
+  }
+}
+
+// ฟังก์ชันสำหรับทำความสะอาดคำถาม (ลบชื่อคนออก)
+function cleanQuestion(question) {
+  const fernKeywords = ['เฟิร์น', 'fern', 'เฟิ', 'เฟิ่น'];
+  const nannamKeywords = ['น่านน้ำ', 'nannam', 'นานาม', 'น่าน', 'นาน'];
+  
+  let cleanedQuestion = question;
+  
+  // ลบชื่อคนออกจากคำถาม
+  [...fernKeywords, ...nannamKeywords].forEach(name => {
+    const regex = new RegExp(name, 'gi');
+    cleanedQuestion = cleanedQuestion.replace(regex, '').trim();
+  });
+  
+  // ลบคำที่เหลือซ้ำ เช่น "ชอบ ชอบ" -> "ชอบ"
+  cleanedQuestion = cleanedQuestion.replace(/\s+/g, ' ').trim();
+  
+  return cleanedQuestion;
+}
+
+// ปรับปรุง Fuzzy search function ให้ค้นหาตามชื่อคน
+async function findAnswer(originalQuestion) {
   try {
-    console.log('🔍 Searching for:', question);
+    console.log('🔍 Original question:', originalQuestion);
+    
+    // ตรวจจับว่าถามเกี่ยวกับใคร
+    const targetPerson = detectPersonInQuestion(originalQuestion);
+    console.log('👤 Target person detected:', targetPerson);
+    
+    // ทำความสะอาดคำถาม
+    const cleanedQuestion = cleanQuestion(originalQuestion);
+    console.log('🧹 Cleaned question:', cleanedQuestion);
+    
+    // ถ้าคำถามว่างเปล่าหลังทำความสะอาด ให้ใช้คำถามเดิม
+    const searchQuestion = cleanedQuestion || originalQuestion;
     
     // ค้นหาจากทุก documents ใน preferences collection
     const preferencesSnapshot = await db.collection('preferences').get();
@@ -135,7 +192,7 @@ async function findAnswer(question) {
       
       // ค้นหาจาก question field
       if (data.question) {
-        const result = fuzzysort.single(question, data.question);
+        const result = fuzzysort.single(searchQuestion, data.question);
         if (result && result.score > bestScore) {
           bestScore = result.score;
           bestMatch = data;
@@ -147,7 +204,7 @@ async function findAnswer(question) {
       // ค้นหาจาก keywords array
       if (data.keywords && Array.isArray(data.keywords)) {
         data.keywords.forEach((keyword, index) => {
-          const result = fuzzysort.single(question, keyword);
+          const result = fuzzysort.single(searchQuestion, keyword);
           if (result && result.score > bestScore) {
             bestScore = result.score;
             bestMatch = data;
@@ -163,23 +220,59 @@ async function findAnswer(question) {
 
     // ใช้ threshold ที่เหมาะสม
     if (bestMatch && bestScore > -3000) {
-      // สุ่มคำตอบระหว่าง fern_answer และ nannam_answer
-      const answers = [];
-      if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
-      if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
+      // ตัดสินใจว่าจะตอบคำตอบของใคร
+      let selectedAnswer = '';
       
-      if (answers.length > 0) {
-        const selectedAnswer = answers[Math.floor(Math.random() * answers.length)];
-        console.log('✅ Answer found:', selectedAnswer.substring(0, 50) + '...');
+      if (targetPerson === 'fern' && bestMatch.fern_answer) {
+        // ถามเฟิร์นเฉพาะ
+        selectedAnswer = `เฟิร์น: ${bestMatch.fern_answer}`;
+      } else if (targetPerson === 'nannam' && bestMatch.nannam_answer) {
+        // ถามน่านน้ำเฉพาะ
+        selectedAnswer = `น่านน้ำ: ${bestMatch.nannam_answer}`;
+      } else if (targetPerson === 'both') {
+        // ไม่ระบุชื่อ หือถามทั้งคู่ - ให้ตอบทั้งคู่หรือสุ่ม
+        const answers = [];
+        if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
+        if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
+        
+        if (answers.length === 2) {
+          // มีคำตอบทั้งคู่ - ให้ตอบทั้งคู่
+          selectedAnswer = answers.join('\n\n');
+        } else if (answers.length === 1) {
+          // มีคำตอบคนเดียว
+          selectedAnswer = answers[0];
+        }
+      }
+      
+      // ถ้าไม่มีคำตอบที่เหมาะสม ลองหาทางเลือกอื่น
+      if (!selectedAnswer) {
+        const fallbackAnswers = [];
+        if (bestMatch.fern_answer) fallbackAnswers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
+        if (bestMatch.nannam_answer) fallbackAnswers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
+        
+        if (fallbackAnswers.length > 0) {
+          if (targetPerson === 'fern') {
+            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของเฟิร์นสำหรับคำถามนี้ 😅`;
+          } else if (targetPerson === 'nannam') {
+            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของน่านน้ำสำหรับคำถามนี้ 😅`;
+          } else {
+            // สุ่มคำตอบ
+            selectedAnswer = fallbackAnswers[Math.floor(Math.random() * fallbackAnswers.length)];
+          }
+        }
+      }
+      
+      if (selectedAnswer) {
+        console.log('✅ Answer found:', selectedAnswer.substring(0, 100) + '...');
         return selectedAnswer;
       } else {
-        console.log('⚠️ Match found but no answers available');
-        return `พบข้อมูลเกี่ยวกับ "${bestMatch.question || 'คำถามนี้'}" แต่ยังไม่มีคำตอบครับ 😅`;
+        console.log('⚠️ Match found but no suitable answers available');
+        return `พบข้อมูลเกี่ยวกับ "${bestMatch.question || 'คำถามนี้'}" แต่ยังไม่มีคำตอบที่เหมาะสมครับ 😅`;
       }
     }
 
     console.log('❌ No matching answer found');
-    return 'ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\nลองถามใหม่ด้วยคำที่ง่ายๆ หน่อยนะครับ';
+    return 'ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\nลองถามใหม่ด้วยคำที่ง่ายๆ หน่อยนะครับ\n\nตัวอย่าง:\n- "เฟิร์นชอบดื่มอะไร"\n- "น่านน้ำชอบอาหารอะไร"';
 
   } catch (error) {
     console.error('❌ Error finding answer:', error);
@@ -225,6 +318,7 @@ app.get('/', (req, res) => {
     <p>Firebase Status: ✅ Connected</p>
     <p>Project ID: ${process.env.FIREBASE_PROJECT_ID}</p>
     <p>Server Time: ${new Date().toISOString()}</p>
+    <p>Features: ✅ Person-specific answers</p>
   `);
 });
 
@@ -246,7 +340,8 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     firebase: 'connected',
-    project_id: process.env.FIREBASE_PROJECT_ID
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    features: ['person_detection', 'fuzzy_search']
   });
 });
 
@@ -275,6 +370,11 @@ app.get('/debug', async (req, res) => {
       status: 'OK',
       firestore_connection: 'success',
       project_id: process.env.FIREBASE_PROJECT_ID,
+      features: {
+        person_detection: 'enabled',
+        fuzzy_search: 'enabled',
+        smart_answering: 'enabled'
+      },
       collections: {
         preferences: {
           size: preferencesSnapshot.size,
@@ -297,9 +397,24 @@ app.get('/debug', async (req, res) => {
   }
 });
 
+// เพิ่ม endpoint สำหรับทดสอบการตรวจจับชื่อ
+app.get('/test-detection/:question', (req, res) => {
+  const question = decodeURIComponent(req.params.question);
+  const person = detectPersonInQuestion(question);
+  const cleaned = cleanQuestion(question);
+  
+  res.json({
+    original_question: question,
+    detected_person: person,
+    cleaned_question: cleaned,
+    search_term: cleaned || question
+  });
+});
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log('🚀 Server running on port', port);
   console.log('📍 Health check:', `http://localhost:${port}/health`);
   console.log('🔍 Debug endpoint:', `http://localhost:${port}/debug`);
+  console.log('🧪 Test detection:', `http://localhost:${port}/test-detection/[question]`);
 });
