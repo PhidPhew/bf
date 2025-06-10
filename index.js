@@ -58,19 +58,19 @@ console.log('🔑 Project ID:', serviceAccount.project_id);
 console.log('🔐 Private key length:', serviceAccount.private_key.length);
 
 // Initialize Firebase Admin
-let db;
 try {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: `https://${serviceAccount.project_id}-default-rtdb.asia-southeast1.firebasedatabase.app/`
   });
-  db = admin.firestore();
   console.log('✅ Firebase initialized successfully');
 } catch (error) {
   console.error('❌ Firebase initialization error:', error.message);
   console.error('Full error:', error);
   process.exit(1);
 }
+
+const db = admin.firestore();
 
 // Test Firestore connection
 async function testFirestoreConnection() {
@@ -94,17 +94,10 @@ async function testFirestoreConnection() {
   }
 }
 
-// Initialize connection test (non-blocking)
-setTimeout(() => {
-  testFirestoreConnection();
-}, 1000);
+testFirestoreConnection();
 
 // ฟังก์ชันสำหรับตรวจจับชื่อคนในคำถาม
 function detectPersonInQuestion(question) {
-  if (!question || typeof question !== 'string') {
-    return 'both';
-  }
-  
   const lowerQuestion = question.toLowerCase();
   
   const fernKeywords = ['เฟิร์น', 'fern', 'เฟิ', 'เฟิ่น'];
@@ -129,10 +122,6 @@ function detectPersonInQuestion(question) {
 
 // ฟังก์ชันสำหรับทำความสะอาดคำถาม
 function cleanQuestion(question) {
-  if (!question || typeof question !== 'string') {
-    return '';
-  }
-  
   const fernKeywords = ['เฟิร์น', 'fern', 'เฟิ', 'เฟิ่น'];
   const nannamKeywords = ['น่านน้ำ', 'nannam', 'นานาม', 'น่าน', 'นาน'];
   
@@ -149,10 +138,6 @@ function cleanQuestion(question) {
 
 // ฟังก์ชันใหม่: แยกคำสำคัญจากคำถาม
 function extractKeywords(question) {
-  if (!question || typeof question !== 'string') {
-    return [];
-  }
-  
   // ลบคำที่ไม่สำคัญ
   const stopWords = [
     'อะไร', 'ไหน', 'เมื่อไหร่', 'ยังไง', 'ทำไม', 'ใคร', 'ไหม', 'หรือ', 'แล้ว',
@@ -171,10 +156,6 @@ function extractKeywords(question) {
 
 // ฟังก์ชันใหม่: คำนวณความคล้ายคลึงแบบหลายมิติ
 function calculateSimilarity(question, data) {
-  if (!question || typeof question !== 'string' || !data) {
-    return { score: -Infinity, details: [] };
-  }
-  
   const questionKeywords = extractKeywords(question.toLowerCase());
   console.log('🔍 Question keywords:', questionKeywords);
   
@@ -182,7 +163,7 @@ function calculateSimilarity(question, data) {
   let matchDetails = [];
   
   // 1. ตรวจสอบ exact match ใน question
-  if (data.question && typeof data.question === 'string') {
+  if (data.question) {
     const exactMatch = questionKeywords.some(keyword => 
       data.question.toLowerCase().includes(keyword)
     );
@@ -192,22 +173,16 @@ function calculateSimilarity(question, data) {
     }
     
     // fuzzy match กับ question
-    try {
-      const fuzzyResult = fuzzysort.single(question, data.question);
-      if (fuzzyResult) {
-        bestScore = Math.max(bestScore, fuzzyResult.score + 500);
-        matchDetails.push(`fuzzy_question: ${fuzzyResult.score}`);
-      }
-    } catch (error) {
-      console.warn('Fuzzy search error:', error.message);
+    const fuzzyResult = fuzzysort.single(question, data.question);
+    if (fuzzyResult) {
+      bestScore = Math.max(bestScore, fuzzyResult.score + 500);
+      matchDetails.push(`fuzzy_question: ${fuzzyResult.score}`);
     }
   }
   
   // 2. ตรวจสอบ keywords array
   if (data.keywords && Array.isArray(data.keywords)) {
     data.keywords.forEach((keyword, index) => {
-      if (typeof keyword !== 'string') return;
-      
       // exact keyword match
       const exactKeywordMatch = questionKeywords.some(qKeyword => 
         keyword.toLowerCase().includes(qKeyword) || qKeyword.includes(keyword.toLowerCase())
@@ -219,14 +194,10 @@ function calculateSimilarity(question, data) {
       }
       
       // fuzzy keyword match
-      try {
-        const fuzzyKeywordResult = fuzzysort.single(question, keyword);
-        if (fuzzyKeywordResult && fuzzyKeywordResult.score > -2000) {
-          bestScore = Math.max(bestScore, fuzzyKeywordResult.score + 300);
-          matchDetails.push(`fuzzy_keyword[${index}]: ${fuzzyKeywordResult.score}`);
-        }
-      } catch (error) {
-        console.warn('Fuzzy keyword search error:', error.message);
+      const fuzzyKeywordResult = fuzzysort.single(question, keyword);
+      if (fuzzyKeywordResult && fuzzyKeywordResult.score > -2000) {
+        bestScore = Math.max(bestScore, fuzzyKeywordResult.score + 300);
+        matchDetails.push(`fuzzy_keyword[${index}]: ${fuzzyKeywordResult.score}`);
       }
       
       // partial keyword match
@@ -241,7 +212,7 @@ function calculateSimilarity(question, data) {
   
   // 3. ตรวจสอบความคล้ายคลึงของคำแต่ละคำ
   questionKeywords.forEach(qKeyword => {
-    if (data.question && typeof data.question === 'string') {
+    if (data.question) {
       const questionWords = extractKeywords(data.question);
       questionWords.forEach(dataWord => {
         if (qKeyword.length > 2 && dataWord.length > 2) {
@@ -273,10 +244,6 @@ function calculateSimilarity(question, data) {
 // ปรับปรุง findAnswer ให้ใช้ระบบใหม่
 async function findAnswer(originalQuestion) {
   try {
-    if (!originalQuestion || typeof originalQuestion !== 'string') {
-      return 'กรุณาส่งคำถามเป็นข้อความครับ 🙏';
-    }
-    
     console.log('🔍 Original question:', originalQuestion);
     
     const targetPerson = detectPersonInQuestion(originalQuestion);
@@ -286,11 +253,6 @@ async function findAnswer(originalQuestion) {
     console.log('🧹 Cleaned question:', cleanedQuestion);
     
     const searchQuestion = cleanedQuestion || originalQuestion;
-    
-    if (!db) {
-      console.error('❌ Database not initialized');
-      return 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล กรุณาลองใหม่อีกครั้ง 🙏';
-    }
     
     const preferencesSnapshot = await db.collection('preferences').get();
     
@@ -308,32 +270,28 @@ async function findAnswer(originalQuestion) {
 
     // วนลูปค้นหาด้วยระบบใหม่
     preferencesSnapshot.forEach(doc => {
-      try {
-        const data = doc.data();
-        const docId = doc.id;
-        
-        console.log(`\n🔍 Checking document: ${docId}`);
-        
-        const similarity = calculateSimilarity(searchQuestion, data);
-        
-        console.log(`📊 Similarity score: ${similarity.score}`);
-        console.log(`📝 Match details:`, similarity.details);
-        
-        allMatches.push({
-          docId,
-          data,
-          score: similarity.score,
-          details: similarity.details
-        });
-        
-        if (similarity.score > bestScore) {
-          bestScore = similarity.score;
-          bestMatch = data;
-          bestDocId = docId;
-          console.log(`📈 New best match: ${docId} (score: ${similarity.score})`);
-        }
-      } catch (docError) {
-        console.error(`❌ Error processing document ${doc.id}:`, docError.message);
+      const data = doc.data();
+      const docId = doc.id;
+      
+      console.log(`\n🔍 Checking document: ${docId}`);
+      
+      const similarity = calculateSimilarity(searchQuestion, data);
+      
+      console.log(`📊 Similarity score: ${similarity.score}`);
+      console.log(`📝 Match details:`, similarity.details);
+      
+      allMatches.push({
+        docId,
+        data,
+        score: similarity.score,
+        details: similarity.details
+      });
+      
+      if (similarity.score > bestScore) {
+        bestScore = similarity.score;
+        bestMatch = data;
+        bestDocId = docId;
+        console.log(`📈 New best match: ${docId} (score: ${similarity.score})`);
       }
     });
 
@@ -352,13 +310,13 @@ async function findAnswer(originalQuestion) {
       let selectedAnswer = '';
       
       if (targetPerson === 'fern' && bestMatch.fern_answer) {
-        selectedAnswer = bestMatch.fern_answer;
+        selectedAnswer = `เฟิร์น: ${bestMatch.fern_answer}`;
       } else if (targetPerson === 'nannam' && bestMatch.nannam_answer) {
-        selectedAnswer = bestMatch.nannam_answer;
+        selectedAnswer = `น่านน้ำ: ${bestMatch.nannam_answer}`;
       } else if (targetPerson === 'both') {
         const answers = [];
-        if (bestMatch.fern_answer) answers.push(bestMatch.fern_answer);
-        if (bestMatch.nannam_answer) answers.push(bestMatch.nannam_answer);
+        if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
+        if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
         
         if (answers.length === 2) {
           selectedAnswer = answers.join('\n\n');
@@ -370,8 +328,8 @@ async function findAnswer(originalQuestion) {
       // ถ้าไม่มีคำตอบที่เหมาะสม ลองหาทางเลือกอื่น
       if (!selectedAnswer) {
         const fallbackAnswers = [];
-        if (bestMatch.fern_answer) fallbackAnswers.push(bestMatch.fern_answer);
-        if (bestMatch.nannam_answer) fallbackAnswers.push(bestMatch.nannam_answer);
+        if (bestMatch.fern_answer) fallbackAnswers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
+        if (bestMatch.nannam_answer) fallbackAnswers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
         
         if (fallbackAnswers.length > 0) {
           if (targetPerson === 'fern') {
@@ -395,16 +353,12 @@ async function findAnswer(originalQuestion) {
     
     // หาคำถามที่คล้ายที่สุด 3 อันดับแรก
     const suggestions = allMatches
-      .filter(match => match.data && match.data.question)
+      .filter(match => match.data.question)
       .slice(0, 3)
       .map(match => `"${match.data.question}"`)
       .join('\n- ');
     
-    if (suggestions) {
-      return `น้ำยังฟังคำถามไม่ออกอ่าา ลองถามคำถามใหม่ดูนะ:\n- ${suggestions}`;
-    } else {
-      return 'น้ำยังฟังคำถามไม่ออกอ่าา ลองถามคำถามใหม่ดูนะครับ 🤔';
-    }
+    return `ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\n\nลองถามคำถามที่คล้ายๆ กันนะครับ:\n- ${suggestions}`;
 
   } catch (error) {
     console.error('❌ Error finding answer:', error);
@@ -420,12 +374,7 @@ async function handleEvent(event) {
       return Promise.resolve(null);
     }
 
-    const userMessage = event.message.text?.trim();
-    if (!userMessage) {
-      console.log('📝 Empty message received');
-      return Promise.resolve(null);
-    }
-    
+    const userMessage = event.message.text.trim();
     console.log('💬 Received message:', userMessage);
     
     const answer = await findAnswer(userMessage);
@@ -437,15 +386,10 @@ async function handleEvent(event) {
     });
   } catch (error) {
     console.error('❌ Error handling event:', error);
-    try {
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: 'เกิดข้อผิดพลาดครับ กรุณาลองใหม่อีกครั้ง 🙏'
-      });
-    } catch (replyError) {
-      console.error('❌ Error sending error reply:', replyError);
-      return Promise.resolve(null);
-    }
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: 'เกิดข้อผิดพลาดครับ กรุณาลองใหม่อีกครั้ง 🙏'
+    });
   }
 }
 
@@ -457,18 +401,13 @@ app.get('/', (req, res) => {
   res.send(`
     <h1>Smart LINE Bot is running! 🧠</h1>
     <p>Firebase Status: ✅ Connected</p>
-    <p>Project ID: ${process.env.FIREBASE_PROJECT_ID || 'Not Set'}</p>
+    <p>Project ID: ${process.env.FIREBASE_PROJECT_ID}</p>
     <p>Server Time: ${new Date().toISOString()}</p>
     <p>Features: ✅ Advanced AI Matching</p>
   `);
 });
 
 app.post('/webhook', (req, res) => {
-  if (!req.body || !req.body.events || !Array.isArray(req.body.events)) {
-    console.error('❌ Invalid webhook payload');
-    return res.status(400).json({ error: 'Invalid payload' });
-  }
-  
   Promise.all(req.body.events.map(handleEvent))
     .then((result) => {
       console.log('✅ Webhook processed successfully');
@@ -476,7 +415,7 @@ app.post('/webhook', (req, res) => {
     })
     .catch((err) => {
       console.error('❌ Webhook error:', err);
-      res.status(500).json({ error: 'Internal server error' });
+      res.status(500).end();
     });
 });
 
@@ -485,8 +424,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    firebase: db ? 'connected' : 'disconnected',
-    project_id: process.env.FIREBASE_PROJECT_ID || 'Not Set',
+    firebase: 'connected',
+    project_id: process.env.FIREBASE_PROJECT_ID,
     features: ['advanced_similarity', 'smart_matching', 'person_detection']
   });
 });
@@ -494,15 +433,6 @@ app.get('/health', (req, res) => {
 // Debug endpoint
 app.get('/debug', async (req, res) => {
   try {
-    if (!db) {
-      return res.status(500).json({
-        status: 'ERROR',
-        firestore_connection: 'not_initialized',
-        project_id: process.env.FIREBASE_PROJECT_ID || 'Not Set',
-        error: 'Database not initialized'
-      });
-    }
-    
     const preferencesSnapshot = await db.collection('preferences').limit(5).get();
     const preferencesDocs = [];
     preferencesSnapshot.forEach(doc => {
@@ -512,7 +442,7 @@ app.get('/debug', async (req, res) => {
     res.json({
       status: 'OK',
       firestore_connection: 'success',
-      project_id: process.env.FIREBASE_PROJECT_ID || 'Not Set',
+      project_id: process.env.FIREBASE_PROJECT_ID,
       features: {
         advanced_similarity: 'enabled',
         keyword_extraction: 'enabled',
@@ -530,7 +460,7 @@ app.get('/debug', async (req, res) => {
     res.status(500).json({
       status: 'ERROR',
       firestore_connection: 'failed',
-      project_id: process.env.FIREBASE_PROJECT_ID || 'Not Set',
+      project_id: process.env.FIREBASE_PROJECT_ID,
       error: error.message
     });
   }
@@ -539,10 +469,6 @@ app.get('/debug', async (req, res) => {
 // เพิ่ม endpoint ทดสอบ similarity
 app.get('/test-similarity/:question', async (req, res) => {
   try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not initialized' });
-    }
-    
     const question = decodeURIComponent(req.params.question);
     const person = detectPersonInQuestion(question);
     const cleaned = cleanQuestion(question);
@@ -576,42 +502,10 @@ app.get('/test-similarity/:question', async (req, res) => {
   }
 });
 
-// Error handling middleware
-app.use((error, req, res, next) => {
-  console.error('❌ Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Handle uncaught errors
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
 const port = process.env.PORT || 3000;
-const server = app.listen(port, () => {
+app.listen(port, () => {
   console.log('🚀 Smart Bot Server running on port', port);
   console.log('📍 Health check:', `http://localhost:${port}/health`);
   console.log('🔍 Debug endpoint:', `http://localhost:${port}/debug`);
   console.log('🧪 Test similarity:', `http://localhost:${port}/test-similarity/[question]`);
 });
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('✅ Process terminated');
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down gracefully');
-  server.close(() => {
-    console.log('✅ Process terminated');
-  });
-});
-
-module.exports = app;
