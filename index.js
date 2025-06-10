@@ -72,29 +72,19 @@ try {
 
 const db = admin.firestore();
 
-// Test Firestore connection - ตรวจสอบ preferences collection
+// Test Firestore connection
 async function testFirestoreConnection() {
   try {
     console.log('🔍 Testing Firestore connection...');
     
-    // ตรวจสอบ collection preferences
     const preferencesSnapshot = await db.collection('preferences').get();
     console.log('📄 Documents in preferences collection:', preferencesSnapshot.size);
     
-    // แสดงรายชื่อ documents ทั้งหมด
     const docNames = [];
     preferencesSnapshot.forEach(doc => {
       docNames.push(doc.id);
     });
     console.log('📋 Document names:', docNames);
-    
-    // ตรวจสอบ audio_content document
-    const audioContentDoc = await db.collection('preferences').doc('audio_content').get();
-    if (audioContentDoc.exists) {
-      console.log('🎵 audio_content document exists');
-      const data = audioContentDoc.data();
-      console.log('📝 Sample fields:', Object.keys(data));
-    }
     
     console.log('✅ Firestore connection successful');
     
@@ -104,23 +94,19 @@ async function testFirestoreConnection() {
   }
 }
 
-// Test connection on startup
 testFirestoreConnection();
 
 // ฟังก์ชันสำหรับตรวจจับชื่อคนในคำถาม
 function detectPersonInQuestion(question) {
   const lowerQuestion = question.toLowerCase();
   
-  // รายการคำที่เกี่ยวข้องกับแต่ละคน
   const fernKeywords = ['เฟิร์น', 'fern', 'เฟิ', 'เฟิ่น'];
   const nannamKeywords = ['น่านน้ำ', 'nannam', 'นานาม', 'น่าน', 'นาน'];
   
-  // ตรวจจับคำที่เกี่ยวข้องกับเฟิร์น
   const hasFernKeyword = fernKeywords.some(keyword => 
     lowerQuestion.includes(keyword.toLowerCase())
   );
   
-  // ตรวจจับคำที่เกี่ยวข้องกับน่านน้ำ
   const hasNannamKeyword = nannamKeywords.some(keyword => 
     lowerQuestion.includes(keyword.toLowerCase())
   );
@@ -130,46 +116,144 @@ function detectPersonInQuestion(question) {
   } else if (hasNannamKeyword && !hasFernKeyword) {
     return 'nannam';
   } else {
-    return 'both'; // ถ้าไม่มีการระบุชื่อหรือมีทั้งคู่
+    return 'both';
   }
 }
 
-// ฟังก์ชันสำหรับทำความสะอาดคำถาม (ลบชื่อคนออก)
+// ฟังก์ชันสำหรับทำความสะอาดคำถาม
 function cleanQuestion(question) {
   const fernKeywords = ['เฟิร์น', 'fern', 'เฟิ', 'เฟิ่น'];
   const nannamKeywords = ['น่านน้ำ', 'nannam', 'นานาม', 'น่าน', 'นาน'];
   
   let cleanedQuestion = question;
   
-  // ลบชื่อคนออกจากคำถาม
   [...fernKeywords, ...nannamKeywords].forEach(name => {
     const regex = new RegExp(name, 'gi');
     cleanedQuestion = cleanedQuestion.replace(regex, '').trim();
   });
   
-  // ลบคำที่เหลือซ้ำ เช่น "ชอบ ชอบ" -> "ชอบ"
   cleanedQuestion = cleanedQuestion.replace(/\s+/g, ' ').trim();
-  
   return cleanedQuestion;
 }
 
-// ปรับปรุง Fuzzy search function ให้ค้นหาตามชื่อคน
+// ฟังก์ชันใหม่: แยกคำสำคัญจากคำถาม
+function extractKeywords(question) {
+  // ลบคำที่ไม่สำคัญ
+  const stopWords = [
+    'อะไร', 'ไหน', 'เมื่อไหร่', 'ยังไง', 'ทำไม', 'ใคร', 'ไหม', 'หรือ', 'แล้ว',
+    'ครับ', 'ค่ะ', 'นะ', 'อ่ะ', 'เอ่อ', 'อืม', 'เออ', 'นะครับ', 'นะคะ',
+    'คือ', 'แบบ', 'พอ', 'จัง', 'มาก', 'เลย', 'สุด', 'ได้', 'มั้ย', 'ไง'
+  ];
+  
+  // แยกคำและลบ stop words
+  let words = question.split(/\s+/).filter(word => {
+    word = word.toLowerCase().replace(/[^\u0E00-\u0E7Fa-zA-Z]/g, '');
+    return word.length > 0 && !stopWords.includes(word);
+  });
+  
+  return words;
+}
+
+// ฟังก์ชันใหม่: คำนวณความคล้ายคลึงแบบหลายมิติ
+function calculateSimilarity(question, data) {
+  const questionKeywords = extractKeywords(question.toLowerCase());
+  console.log('🔍 Question keywords:', questionKeywords);
+  
+  let bestScore = -Infinity;
+  let matchDetails = [];
+  
+  // 1. ตรวจสอบ exact match ใน question
+  if (data.question) {
+    const exactMatch = questionKeywords.some(keyword => 
+      data.question.toLowerCase().includes(keyword)
+    );
+    if (exactMatch) {
+      bestScore = Math.max(bestScore, 1000);
+      matchDetails.push('exact_question_match');
+    }
+    
+    // fuzzy match กับ question
+    const fuzzyResult = fuzzysort.single(question, data.question);
+    if (fuzzyResult) {
+      bestScore = Math.max(bestScore, fuzzyResult.score + 500);
+      matchDetails.push(`fuzzy_question: ${fuzzyResult.score}`);
+    }
+  }
+  
+  // 2. ตรวจสอบ keywords array
+  if (data.keywords && Array.isArray(data.keywords)) {
+    data.keywords.forEach((keyword, index) => {
+      // exact keyword match
+      const exactKeywordMatch = questionKeywords.some(qKeyword => 
+        keyword.toLowerCase().includes(qKeyword) || qKeyword.includes(keyword.toLowerCase())
+      );
+      
+      if (exactKeywordMatch) {
+        bestScore = Math.max(bestScore, 800);
+        matchDetails.push(`exact_keyword[${index}]: ${keyword}`);
+      }
+      
+      // fuzzy keyword match
+      const fuzzyKeywordResult = fuzzysort.single(question, keyword);
+      if (fuzzyKeywordResult && fuzzyKeywordResult.score > -2000) {
+        bestScore = Math.max(bestScore, fuzzyKeywordResult.score + 300);
+        matchDetails.push(`fuzzy_keyword[${index}]: ${fuzzyKeywordResult.score}`);
+      }
+      
+      // partial keyword match
+      questionKeywords.forEach(qKeyword => {
+        if (qKeyword.length > 2 && keyword.toLowerCase().includes(qKeyword)) {
+          bestScore = Math.max(bestScore, 600);
+          matchDetails.push(`partial_keyword[${index}]: ${qKeyword} in ${keyword}`);
+        }
+      });
+    });
+  }
+  
+  // 3. ตรวจสอบความคล้ายคลึงของคำแต่ละคำ
+  questionKeywords.forEach(qKeyword => {
+    if (data.question) {
+      const questionWords = extractKeywords(data.question);
+      questionWords.forEach(dataWord => {
+        if (qKeyword.length > 2 && dataWord.length > 2) {
+          // เช็ค substring match
+          if (qKeyword.includes(dataWord) || dataWord.includes(qKeyword)) {
+            bestScore = Math.max(bestScore, 400);
+            matchDetails.push(`word_similarity: ${qKeyword} ~ ${dataWord}`);
+          }
+          
+          // เช็ค edit distance (simple)
+          if (Math.abs(qKeyword.length - dataWord.length) <= 2) {
+            let commonChars = 0;
+            for (let i = 0; i < Math.min(qKeyword.length, dataWord.length); i++) {
+              if (qKeyword[i] === dataWord[i]) commonChars++;
+            }
+            if (commonChars >= Math.min(qKeyword.length, dataWord.length) * 0.6) {
+              bestScore = Math.max(bestScore, 300);
+              matchDetails.push(`char_similarity: ${qKeyword} ~ ${dataWord}`);
+            }
+          }
+        }
+      });
+    }
+  });
+  
+  return { score: bestScore, details: matchDetails };
+}
+
+// ปรับปรุง findAnswer ให้ใช้ระบบใหม่
 async function findAnswer(originalQuestion) {
   try {
     console.log('🔍 Original question:', originalQuestion);
     
-    // ตรวจจับว่าถามเกี่ยวกับใคร
     const targetPerson = detectPersonInQuestion(originalQuestion);
     console.log('👤 Target person detected:', targetPerson);
     
-    // ทำความสะอาดคำถาม
     const cleanedQuestion = cleanQuestion(originalQuestion);
     console.log('🧹 Cleaned question:', cleanedQuestion);
     
-    // ถ้าคำถามว่างเปล่าหลังทำความสะอาด ให้ใช้คำถามเดิม
     const searchQuestion = cleanedQuestion || originalQuestion;
     
-    // ค้นหาจากทุก documents ใน preferences collection
     const preferencesSnapshot = await db.collection('preferences').get();
     
     if (preferencesSnapshot.empty) {
@@ -182,64 +266,61 @@ async function findAnswer(originalQuestion) {
     let bestMatch = null;
     let bestScore = -Infinity;
     let bestDocId = '';
+    let allMatches = [];
 
-    // วนลูปค้นหาจากทุก documents
+    // วนลูปค้นหาด้วยระบบใหม่
     preferencesSnapshot.forEach(doc => {
       const data = doc.data();
       const docId = doc.id;
       
-      console.log(`🔍 Checking document: ${docId}`);
+      console.log(`\n🔍 Checking document: ${docId}`);
       
-      // ค้นหาจาก question field
-      if (data.question) {
-        const result = fuzzysort.single(searchQuestion, data.question);
-        if (result && result.score > bestScore) {
-          bestScore = result.score;
-          bestMatch = data;
-          bestDocId = docId;
-          console.log(`📈 New best match from question in ${docId}: score ${result.score}`);
-        }
-      }
-
-      // ค้นหาจาก keywords array
-      if (data.keywords && Array.isArray(data.keywords)) {
-        data.keywords.forEach((keyword, index) => {
-          const result = fuzzysort.single(searchQuestion, keyword);
-          if (result && result.score > bestScore) {
-            bestScore = result.score;
-            bestMatch = data;
-            bestDocId = docId;
-            console.log(`📈 New best match from keyword[${index}] "${keyword}" in ${docId}: score ${result.score}`);
-          }
-        });
+      const similarity = calculateSimilarity(searchQuestion, data);
+      
+      console.log(`📊 Similarity score: ${similarity.score}`);
+      console.log(`📝 Match details:`, similarity.details);
+      
+      allMatches.push({
+        docId,
+        data,
+        score: similarity.score,
+        details: similarity.details
+      });
+      
+      if (similarity.score > bestScore) {
+        bestScore = similarity.score;
+        bestMatch = data;
+        bestDocId = docId;
+        console.log(`📈 New best match: ${docId} (score: ${similarity.score})`);
       }
     });
 
-    console.log('🎯 Final best match score:', bestScore);
+    // เรียงลำดับและแสดง top matches
+    allMatches.sort((a, b) => b.score - a.score);
+    console.log('\n🏆 Top 3 matches:');
+    allMatches.slice(0, 3).forEach((match, index) => {
+      console.log(`${index + 1}. ${match.docId}: ${match.score} - ${match.details.join(', ')}`);
+    });
+
+    console.log(`\n🎯 Final best match score: ${bestScore}`);
     console.log('📄 Best match from document:', bestDocId);
 
-    // ใช้ threshold ที่เหมาะสม
-    if (bestMatch && bestScore > -3000) {
-      // ตัดสินใจว่าจะตอบคำตอบของใคร
+    // ลด threshold ให้ต่ำลง เพื่อให้ตอบได้มากขึ้น
+    if (bestMatch && bestScore > -1000) {
       let selectedAnswer = '';
       
       if (targetPerson === 'fern' && bestMatch.fern_answer) {
-        // ถามเฟิร์นเฉพาะ
         selectedAnswer = `เฟิร์น: ${bestMatch.fern_answer}`;
       } else if (targetPerson === 'nannam' && bestMatch.nannam_answer) {
-        // ถามน่านน้ำเฉพาะ
         selectedAnswer = `น่านน้ำ: ${bestMatch.nannam_answer}`;
       } else if (targetPerson === 'both') {
-        // ไม่ระบุชื่อ หือถามทั้งคู่ - ให้ตอบทั้งคู่หรือสุ่ม
         const answers = [];
         if (bestMatch.fern_answer) answers.push(`เฟิร์น: ${bestMatch.fern_answer}`);
         if (bestMatch.nannam_answer) answers.push(`น่านน้ำ: ${bestMatch.nannam_answer}`);
         
         if (answers.length === 2) {
-          // มีคำตอบทั้งคู่ - ให้ตอบทั้งคู่
           selectedAnswer = answers.join('\n\n');
         } else if (answers.length === 1) {
-          // มีคำตอบคนเดียว
           selectedAnswer = answers[0];
         }
       }
@@ -252,11 +333,10 @@ async function findAnswer(originalQuestion) {
         
         if (fallbackAnswers.length > 0) {
           if (targetPerson === 'fern') {
-            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของเฟิร์นสำหรับคำถามนี้ 😅`;
+            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของเฟิร์นสำหรับคำถามนี้ 😅\nแต่มีข้อมูลใกล้เคียง: ${fallbackAnswers[0]}`;
           } else if (targetPerson === 'nannam') {
-            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของน่านน้ำสำหรับคำถามนี้ 😅`;
+            selectedAnswer = `ขออภัยครับ ไม่มีข้อมูลของน่านน้ำสำหรับคำถามนี้ 😅\nแต่มีข้อมูลใกล้เคียง: ${fallbackAnswers[fallbackAnswers.length - 1]}`;
           } else {
-            // สุ่มคำตอบ
             selectedAnswer = fallbackAnswers[Math.floor(Math.random() * fallbackAnswers.length)];
           }
         }
@@ -265,14 +345,20 @@ async function findAnswer(originalQuestion) {
       if (selectedAnswer) {
         console.log('✅ Answer found:', selectedAnswer.substring(0, 100) + '...');
         return selectedAnswer;
-      } else {
-        console.log('⚠️ Match found but no suitable answers available');
-        return `พบข้อมูลเกี่ยวกับ "${bestMatch.question || 'คำถามนี้'}" แต่ยังไม่มีคำตอบที่เหมาะสมครับ 😅`;
       }
     }
 
+    // ถ้าไม่เจอเลย ให้แสดงคำแนะนำที่ชาญฉลาดขึ้น
     console.log('❌ No matching answer found');
-    return 'ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\nลองถามใหม่ด้วยคำที่ง่ายๆ หน่อยนะครับ\n\nตัวอย่าง:\n- "เฟิร์นชอบดื่มอะไร"\n- "น่านน้ำชอบอาหารอะไร"';
+    
+    // หาคำถามที่คล้ายที่สุด 3 อันดับแรก
+    const suggestions = allMatches
+      .filter(match => match.data.question)
+      .slice(0, 3)
+      .map(match => `"${match.data.question}"`)
+      .join('\n- ');
+    
+    return `ขออภัยครับ ไม่พบคำตอบสำหรับคำถามนี้ 😅\n\nลองถามคำถามที่คล้ายๆ กันนะครับ:\n- ${suggestions}`;
 
   } catch (error) {
     console.error('❌ Error finding answer:', error);
@@ -291,7 +377,6 @@ async function handleEvent(event) {
     const userMessage = event.message.text.trim();
     console.log('💬 Received message:', userMessage);
     
-    // หาคำตอบจาก Firebase
     const answer = await findAnswer(userMessage);
 
     console.log('📤 Sending reply...');
@@ -314,11 +399,11 @@ app.use('/webhook', line.middleware(config));
 // Routes
 app.get('/', (req, res) => {
   res.send(`
-    <h1>LINE Bot is running! 🎉</h1>
+    <h1>Smart LINE Bot is running! 🧠</h1>
     <p>Firebase Status: ✅ Connected</p>
     <p>Project ID: ${process.env.FIREBASE_PROJECT_ID}</p>
     <p>Server Time: ${new Date().toISOString()}</p>
-    <p>Features: ✅ Person-specific answers</p>
+    <p>Features: ✅ Advanced AI Matching</p>
   `);
 });
 
@@ -341,29 +426,17 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     firebase: 'connected',
     project_id: process.env.FIREBASE_PROJECT_ID,
-    features: ['person_detection', 'fuzzy_search']
+    features: ['advanced_similarity', 'smart_matching', 'person_detection']
   });
 });
 
-// ปรับปรุง Debug endpoint ให้ตรวจสอบ collection ที่ถูกต้อง
+// Debug endpoint
 app.get('/debug', async (req, res) => {
   try {
-    // ตรวจสอบ preferences collection
     const preferencesSnapshot = await db.collection('preferences').limit(5).get();
     const preferencesDocs = [];
     preferencesSnapshot.forEach(doc => {
       preferencesDocs.push({ id: doc.id, data: doc.data() });
-    });
-    
-    // ตรวจสอบ book_type document
-    const bookTypeDoc = await db.collection('preferences').doc('book_type').get();
-    const bookTypeData = bookTypeDoc.exists ? bookTypeDoc.data() : null;
-    
-    // ตรวจสอบ audio_content collection
-    const audioSnapshot = await db.collection('audio_content').limit(5).get();
-    const audioDocs = [];
-    audioSnapshot.forEach(doc => {
-      audioDocs.push({ id: doc.id, data: doc.data() });
     });
     
     res.json({
@@ -371,19 +444,15 @@ app.get('/debug', async (req, res) => {
       firestore_connection: 'success',
       project_id: process.env.FIREBASE_PROJECT_ID,
       features: {
-        person_detection: 'enabled',
-        fuzzy_search: 'enabled',
-        smart_answering: 'enabled'
+        advanced_similarity: 'enabled',
+        keyword_extraction: 'enabled',
+        multi_dimensional_matching: 'enabled',
+        smart_suggestions: 'enabled'
       },
       collections: {
         preferences: {
           size: preferencesSnapshot.size,
           sample_docs: preferencesDocs
-        },
-        book_type_document: bookTypeData,
-        audio_content: {
-          size: audioSnapshot.size,
-          sample_docs: audioDocs
         }
       }
     });
@@ -397,24 +466,46 @@ app.get('/debug', async (req, res) => {
   }
 });
 
-// เพิ่ม endpoint สำหรับทดสอบการตรวจจับชื่อ
-app.get('/test-detection/:question', (req, res) => {
-  const question = decodeURIComponent(req.params.question);
-  const person = detectPersonInQuestion(question);
-  const cleaned = cleanQuestion(question);
-  
-  res.json({
-    original_question: question,
-    detected_person: person,
-    cleaned_question: cleaned,
-    search_term: cleaned || question
-  });
+// เพิ่ม endpoint ทดสอบ similarity
+app.get('/test-similarity/:question', async (req, res) => {
+  try {
+    const question = decodeURIComponent(req.params.question);
+    const person = detectPersonInQuestion(question);
+    const cleaned = cleanQuestion(question);
+    const keywords = extractKeywords(cleaned || question);
+    
+    // ทดสอบกับ document แรก
+    const preferencesSnapshot = await db.collection('preferences').limit(3).get();
+    const testResults = [];
+    
+    preferencesSnapshot.forEach(doc => {
+      const data = doc.data();
+      const similarity = calculateSimilarity(cleaned || question, data);
+      testResults.push({
+        document_id: doc.id,
+        score: similarity.score,
+        details: similarity.details,
+        data_question: data.question,
+        data_keywords: data.keywords
+      });
+    });
+    
+    res.json({
+      original_question: question,
+      detected_person: person,
+      cleaned_question: cleaned,
+      extracted_keywords: keywords,
+      test_results: testResults.sort((a, b) => b.score - a.score)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log('🚀 Server running on port', port);
+  console.log('🚀 Smart Bot Server running on port', port);
   console.log('📍 Health check:', `http://localhost:${port}/health`);
   console.log('🔍 Debug endpoint:', `http://localhost:${port}/debug`);
-  console.log('🧪 Test detection:', `http://localhost:${port}/test-detection/[question]`);
+  console.log('🧪 Test similarity:', `http://localhost:${port}/test-similarity/[question]`);
 });
